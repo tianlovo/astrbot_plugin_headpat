@@ -20,4 +20,5 @@ __pycache__/
 # Exclude generated/demo artifacts in plugin assets
 astrbot_plugin_petpet/data/petpet.zip
 astrbot_plugin_petpet/data/petpet/*.gif
-*.md
+
+.trae/documents/plan_20260214_062419.md

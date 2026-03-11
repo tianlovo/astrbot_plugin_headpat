@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
+import httpx
 from PIL import Image
 
 from astrbot.api import logger
@@ -20,6 +21,11 @@ DEFAULT_CONFIG = {
     "trigger": "摸摸",
     "interval": 0.06,
 }
+
+QQ_AVATAR_URLS = [
+    "https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640&img_type=jpg",
+    "https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640",
+]
 
 
 @register("astrbot_plugin_petpet", "codex", "摸头杀 petpet GIF 插件", "1.0.0")
@@ -70,7 +76,7 @@ class PetPetPlugin(Star):
 
         avatar = await self._resolve_avatar(event, target_user_id)
         if avatar is None:
-            yield event.plain_result("未能获取目标头像（仅支持本地路径/字节/base64，不进行网络下载）。")
+            yield event.plain_result("未能获取目标头像，请稍后再试。")
             return
 
         try:
@@ -211,6 +217,28 @@ class PetPetPlugin(Star):
             img = self._to_image(data)
             if img is not None:
                 return img.convert("RGBA")
+        
+        img = await self._download_qq_avatar(user_id)
+        if img is not None:
+            return img
+        
+        return None
+    
+    async def _download_qq_avatar(self, user_id: str) -> Optional[Image.Image]:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for url_template in QQ_AVATAR_URLS:
+                url = url_template.format(user_id=user_id)
+                try:
+                    resp = await client.get(url, headers=headers, follow_redirects=True)
+                    if resp.status_code == 200 and len(resp.content) > 0:
+                        img = Image.open(io.BytesIO(resp.content))
+                        logger.info(f"[petpet] 从QQ头像API获取头像成功: {user_id}")
+                        return img.convert("RGBA")
+                except Exception as e:
+                    logger.warning(f"[petpet] 获取头像失败 {url}: {e}")
         return None
 
     def _to_image(self, data: Any) -> Optional[Image.Image]:
