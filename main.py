@@ -47,7 +47,7 @@ class PetPetPlugin(Star):
         logger.info("[petpet] 插件已加载，定时清理任务已启动")
 
     @filter.event_message_type(filter.EventMessageType.ALL)
-    async def on_message(self, event: AstrMessageEvent):
+    async def on_message(self, event: AstrMessageEvent, *args, **kwargs):
         text = self._get_text(event).strip()
         if not text:
             return
