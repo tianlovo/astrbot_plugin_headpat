@@ -71,7 +71,7 @@ class PetPetPlugin(Star):
 
         target_user_id = self._resolve_target_user_id(event)
         if not target_user_id:
-            yield event.plain_result("请使用“摸摸 @某人”，或回复某人消息后发送“摸摸”。")
+            yield event.plain_result("无法识别用户，请稍后再试。")
             return
 
         avatar = await self._resolve_avatar(event, target_user_id)
@@ -167,7 +167,17 @@ class PetPetPlugin(Star):
             raw = getattr(msg_obj, "raw_message", None)
             reply_uid = self._extract_reply_uid(raw)
 
-        return str(at_uid or reply_uid) if (at_uid or reply_uid) else None
+        if at_uid:
+            return str(at_uid)
+        if reply_uid:
+            return str(reply_uid)
+        
+        sender = getattr(msg_obj, "sender", None)
+        sender_id = self._first_attr(sender, ("user_id", "id", "qq"))
+        if sender_id:
+            return str(sender_id)
+        
+        return None
 
     def _extract_reply_uid(self, raw: Any) -> Optional[str]:
         if not isinstance(raw, dict):
