@@ -281,7 +281,7 @@ class PetPetPlugin(Star):
 
     def _build_petpet_gif(self, avatar: Image.Image, interval: float) -> Path:
         canvas_size = (112, 112)
-        avatar_size = 85
+        avatar_size = 65
         avatar = avatar.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
         
         frames = []
