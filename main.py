@@ -281,14 +281,16 @@ class PetPetPlugin(Star):
 
     def _build_petpet_gif(self, avatar: Image.Image, interval: float) -> Path:
         canvas_size = (112, 112)
-        avatar = avatar.resize(canvas_size, Image.Resampling.LANCZOS)
+        avatar_size = 85
+        avatar = avatar.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
         
         frames = []
         for i in range(5):
             hand = Image.open(self.assets_dir / f"frame{i}.png").convert("RGBA")
             canvas = Image.new("RGBA", canvas_size, (255, 255, 255, 0))
             
-            canvas.paste(avatar, (0, 0))
+            offset = (canvas_size[0] - avatar_size) // 2
+            canvas.paste(avatar, (offset, offset))
             canvas = Image.alpha_composite(canvas, hand)
             
             frames.append(canvas.convert("P", palette=Image.Palette.ADAPTIVE))
