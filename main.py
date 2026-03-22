@@ -28,7 +28,7 @@ COMMAND_ALIASES = {"摸摸", "摸", "摸头杀"}
     "astrbot_plugin_headpat",
     "tianluoqaq",
     "摸头杀插件 - at机器人后发送摸头命令生成GIF",
-    "1.3.3",
+    "1.3.4",
 )
 class HeadpatPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
@@ -382,9 +382,8 @@ class HeadpatPlugin(Star):
                 gif_data = f.read()
             gif_b64 = base64.b64encode(gif_data).decode()
 
-            # 构建消息：at新成员 + GIF图片
+            # 构建消息：GIF图片
             message = [
-                {"type": "at", "data": {"qq": user_id}},
                 {"type": "image", "data": {"file": f"base64://{gif_b64}"}},
             ]
 
