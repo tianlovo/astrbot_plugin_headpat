@@ -5,8 +5,8 @@ GIF 缓存服务模块
 遵守 AstrBot 大文件存储规范。
 """
 
+from .exceptions import CacheError, CacheExpiredError, CacheNotFoundError
 from .gif_cache import GifCacheService
-from .exceptions import CacheError, CacheNotFoundError, CacheExpiredError
 
 __all__ = [
     "GifCacheService",

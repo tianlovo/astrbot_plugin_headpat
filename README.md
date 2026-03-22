@@ -11,6 +11,7 @@ AstrBot 摸头杀插件 - at机器人发送"摸头"命令生成个性化摸头GI
 - ⚙️ **群白名单**: 支持配置允许使用功能的QQ群列表
 - 🎨 **透明背景**: 默认启用透明背景，支持自定义背景颜色
 - 💾 **GIF缓存**: 智能缓存机制，避免重复生成，提高响应速度
+- 👋 **入群欢迎**: 支持新成员加入群聊时自动发送摸头GIF欢迎
 - ✨ **精美动画**: 5帧流畅动画，包含手部和挤压效果
 
 ## 依赖
@@ -82,6 +83,8 @@ AstrBot 摸头杀插件 - at机器人发送"摸头"命令生成个性化摸头GI
 | `cleanup_on_startup` | bool | false | 启动时是否执行一次过期缓存清理 |
 | `avatar_size` | int | 75 | 头像大小（像素），建议范围 50 ~ 100 |
 | `circular_avatar` | bool | false | 是否将头像处理为圆形 |
+| `welcome_on_join` | bool | false | 是否开启群成员加入欢迎功能 |
+| `welcome_groups` | list | [] | 允许使用欢迎功能的群列表，为空则允许所有群 |
 
 ### QQ群白名单配置
 
@@ -138,6 +141,22 @@ AstrBot 摸头杀插件 - at机器人发送"摸头"命令生成个性化摸头GI
 ```
 data/plugin_data/astrbot_plugin_headpat/gif_cache/
 ```
+
+### 入群欢迎配置
+
+启用新成员加入欢迎功能：
+
+```json
+{
+  "welcome_on_join": true,
+  "welcome_groups": ["123456789", "987654321"]
+}
+```
+
+**说明：**
+- `welcome_on_join`: 开启后，有新成员加入群聊时自动发送摸头GIF欢迎
+- `welcome_groups`: 允许使用欢迎功能的群列表，为空则允许所有群
+- 欢迎功能同样使用缓存机制，避免重复生成
 
 ## 技术实现
 

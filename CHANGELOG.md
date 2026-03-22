@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.3.3 (2026-03-22)
+
+### 修复
+- **入群欢迎事件监听**: 修复入群事件监听方式，采用与参考插件一致的实现
+  - 使用 `client.on_notice("group_increase")` 装饰器注册事件处理器
+  - 替代原来的 `@filter.event_message_type` 方式，更可靠地接收 OneBot 通知事件
+  - 添加 `_get_client()` 方法使用鸭子类型获取 OneBot 客户端
+  - 添加 `_safe_register_handler()` 方法稳健注册事件监听（带重试机制）
+  - 优化 `_on_group_increase()` 事件处理逻辑，直接从 event 字典获取参数
+  - 添加 `_send_group_welcome()` 方法使用 OneBot API 发送欢迎消息
+
+## v1.3.2 (2026-03-22)
+
+### 新增
+- **入群欢迎功能**: 新成员加入群聊时自动发送摸头GIF欢迎
+  - 新增 `welcome_on_join` 配置项，控制是否开启欢迎功能
+  - 新增 `welcome_groups` 配置项，设置允许欢迎功能的群白名单
+  - 监听 OneBot v11 `group_increase` 事件检测新成员加入
+  - 欢迎消息同样使用缓存机制，提高响应速度
+
 ## v1.3.0 (2026-03-22)
 
 ### 新增

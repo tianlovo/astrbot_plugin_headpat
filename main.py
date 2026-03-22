@@ -5,7 +5,7 @@ import io
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 from PIL import Image, ImageDraw
@@ -16,7 +16,6 @@ from astrbot.api.star import Context, Star, register
 
 from .service import GifCacheService
 
-
 QQ_AVATAR_URLS = [
     "https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640&img_type=jpg",
     "https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640",
@@ -25,7 +24,12 @@ QQ_AVATAR_URLS = [
 COMMAND_ALIASES = {"摸摸", "摸", "摸头杀"}
 
 
-@register("astrbot_plugin_headpat", "tianluoqaq", "摸头杀插件 - at机器人后发送摸头命令生成GIF", "1.3.2")
+@register(
+    "astrbot_plugin_headpat",
+    "tianluoqaq",
+    "摸头杀插件 - at机器人后发送摸头命令生成GIF",
+    "1.3.3",
+)
 class HeadpatPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -35,11 +39,16 @@ class HeadpatPlugin(Star):
         self.assets_dir = self.base_dir / "data" / "petpet"
         self.output_dir = self.assets_dir / "output"
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self._cleanup_task: Optional[asyncio.Task] = None
-        
+        self._cleanup_task: asyncio.Task | None = None
+
+        # 运行状态标记
+        self._is_running = True
+
         # 初始化GIF缓存服务
-        self.cache_service = GifCacheService("astrbot_plugin_headpat", self.patpat_config)
-        
+        self.cache_service = GifCacheService(
+            "astrbot_plugin_headpat", self.patpat_config
+        )
+
         # 如果配置了启动时清理，执行一次过期清理
         if self.patpat_config.get("cleanup_on_startup", False):
             try:
@@ -49,40 +58,102 @@ class HeadpatPlugin(Star):
             except Exception as e:
                 logger.warning(f"[headpat] 启动时清理缓存失败: {e}")
 
+        # 注册入群事件监听
+        self._register_task = asyncio.create_task(self._safe_register_handler())
+
     @filter.on_astrbot_loaded()
     async def on_astrbot_loaded(self):
         # 启动旧版清理任务（清理临时文件）
         if self._cleanup_task is None or self._cleanup_task.done():
             self._cleanup_task = asyncio.create_task(self._cleanup_gif_loop())
-        
+
         # 启动缓存自动清理任务
         self.cache_service.start_auto_cleanup()
-        
+
         logger.info("[headpat] 插件已加载，定时清理任务已启动")
+
+    async def _safe_register_handler(self):
+        """稳健的事件监听注册逻辑"""
+        max_retries = 15
+        for _ in range(max_retries):
+            if not self._is_running:
+                return
+
+            client = self._get_client()
+            if client:
+                try:
+                    if hasattr(client, "on_notice"):
+
+                        @client.on_notice("group_increase")
+                        async def _group_increase_handler(event):
+                            if not self._is_running:
+                                return
+                            await self._on_group_increase(event)
+
+                        logger.info("[headpat] OneBot 11 入群事件监听已成功注册。")
+                        return
+                except Exception as e:
+                    logger.error(f"[headpat] 注册监听失败: {e}")
+
+            await asyncio.sleep(5)
+
+        logger.warning("[headpat] 超时未找到 OneBot 适配器，入群欢迎功能可能受限。")
+
+    def _get_client(self):
+        """
+        使用鸭子类型判断适配器是否可用，
+        避免依赖类名字符串匹配导致的脆弱性。
+        只要适配器拥有 bot 对象且 bot 具备 api 属性，即视为有效客户端。
+        """
+        try:
+            for adapter in self.context.platform_manager.get_insts():
+                if (
+                    hasattr(adapter, "bot")
+                    and adapter.bot
+                    and hasattr(adapter.bot, "api")
+                ):
+                    return adapter.bot
+        except Exception as e:
+            logger.debug(f"[headpat] _get_client 遍历适配器异常: {e}")
+        return None
 
     @filter.on_plugin_unloaded()
     async def on_plugin_unloaded(self, metadata):
         """插件卸载时清理资源
-        
+
         Args:
             metadata: 插件元数据
         """
+        self._is_running = False
+
+        # 停止注册任务
+        if (
+            hasattr(self, "_register_task")
+            and self._register_task
+            and not self._register_task.done()
+        ):
+            self._register_task.cancel()
+            try:
+                await self._register_task
+            except asyncio.CancelledError:
+                pass
+
         # 停止旧版清理任务
         if self._cleanup_task and not self._cleanup_task.done():
             self._cleanup_task.cancel()
-        
+
         # 停止缓存自动清理任务
         self.cache_service.stop_auto_cleanup()
-        
+
         logger.info("[headpat] 插件已卸载，清理任务已停止")
 
     @filter.command("摸头", alias={"摸摸", "摸", "摸头杀"})
     async def headpat_command(self, event: AstrMessageEvent):
-        '''摸头命令 - at机器人后发送摸头命令生成个性化摸头GIF
+        """摸头命令 - at机器人后发送摸头命令生成个性化摸头GIF
         别名: 摸摸、摸、摸头杀
         用法: @机器人 摸头 @目标用户
         如果只@机器人，则生成机器人自己的摸头GIF
-        '''
+        """
         # 检查插件是否启用
         if not self.patpat_config.get("enable", True):
             return
@@ -113,8 +184,12 @@ class HeadpatPlugin(Star):
 
         # 检查素材是否就绪
         if not self._assets_ready():
-            logger.error("[headpat] 缺少素材，请检查 data/petpet/frame0.png ~ frame4.png")
-            yield event.plain_result("摸头素材缺失，请联系管理员检查插件目录下 data/petpet/frame0~4.png")
+            logger.error(
+                "[headpat] 缺少素材，请检查 data/petpet/frame0.png ~ frame4.png"
+            )
+            yield event.plain_result(
+                "摸头素材缺失，请联系管理员检查插件目录下 data/petpet/frame0~4.png"
+            )
             return
 
         # 尝试从缓存获取（不检查头像哈希，只检查用户ID）
@@ -134,7 +209,7 @@ class HeadpatPlugin(Star):
         if avatar is None:
             yield event.plain_result("未能获取目标头像，请稍后再试。")
             return
-        
+
         # 计算头像哈希用于存储缓存
         avatar_hash = None
         try:
@@ -148,7 +223,9 @@ class HeadpatPlugin(Star):
             interval = 0.06 / speed
             transparent_bg = self.patpat_config.get("transparent_background", True)
             bg_color = self.patpat_config.get("background_color", "#FFFFFF")
-            gif_path = self._build_petpet_gif(avatar, interval, transparent_bg, bg_color)
+            gif_path = self._build_petpet_gif(
+                avatar, interval, transparent_bg, bg_color
+            )
         except Exception:
             logger.exception("[headpat] 生成 GIF 失败")
             yield event.plain_result("生成摸头 GIF 失败，请稍后再试。")
@@ -157,7 +234,9 @@ class HeadpatPlugin(Star):
         # 存入缓存
         if self.patpat_config.get("cache_enabled", True):
             try:
-                cache_path = self.cache_service.set(target_user_id, gif_path, avatar_hash)
+                cache_path = self.cache_service.set(
+                    target_user_id, gif_path, avatar_hash
+                )
                 logger.info(f"[headpat] 已缓存: {target_user_id}")
                 # 使用缓存路径发送
                 yield self._image_result(event, cache_path)
@@ -171,10 +250,10 @@ class HeadpatPlugin(Star):
 
     def _calculate_avatar_hash(self, avatar: Image.Image) -> str:
         """计算头像哈希值
-        
+
         Args:
             avatar: 头像图片
-            
+
         Returns:
             哈希字符串
         """
@@ -199,59 +278,51 @@ class HeadpatPlugin(Star):
             return True
         return group_id in welcome_groups
 
-    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
-    async def on_group_event(self, event: AstrMessageEvent):
-        """处理群事件，包括成员加入"""
+    async def _on_group_increase(self, event: dict):
+        """处理群成员增加事件（入群欢迎）
+
+        Args:
+            event: OneBot 通知事件字典
+        """
+        try:
+            notice_type = event.get("notice_type")
+            group_id = str(event.get("group_id", ""))
+            user_id = str(event.get("user_id", ""))
+        except Exception:
+            return
+
+        # 检查是否为 group_increase 事件
+        if notice_type != "group_increase" or not group_id or not user_id:
+            return
+
         # 检查欢迎功能是否开启
         if not self.patpat_config.get("welcome_on_join", False):
             return
 
-        # 获取消息对象
-        msg_obj = getattr(event, "message_obj", None)
-        if not msg_obj:
+        # 检查群是否允许欢迎功能
+        if not self._is_group_welcome_allowed(group_id):
             return
 
-        # 获取 raw_message 检查是否为 group_increase 事件
-        raw_msg = getattr(msg_obj, "raw_message", None)
-        if not raw_msg:
+        # 检查素材是否就绪
+        if not self._assets_ready():
+            logger.error("[headpat] 缺少素材，无法发送欢迎消息")
             return
 
-        # 检查是否为 group_increase 事件
-        if isinstance(raw_msg, dict):
-            post_type = raw_msg.get("post_type")
-            notice_type = raw_msg.get("notice_type")
-            if post_type != "notice" or notice_type != "group_increase":
-                return
+        logger.info(f"[headpat] 检测到新成员加入群 {group_id}，用户ID: {user_id}")
 
-            # 获取群号和新成员ID
-            group_id = str(raw_msg.get("group_id", ""))
-            user_id = str(raw_msg.get("user_id", ""))
+        # 尝试从缓存获取
+        gif_path = None
+        if self.patpat_config.get("cache_enabled", True):
+            try:
+                cached_path = self.cache_service.get(user_id)
+                if cached_path and cached_path.exists():
+                    logger.info(f"[headpat] 欢迎缓存命中: {user_id}")
+                    gif_path = cached_path
+            except Exception as e:
+                logger.warning(f"[headpat] 读取欢迎缓存失败: {e}")
 
-            if not group_id or not user_id:
-                return
-
-            # 检查群是否允许欢迎功能
-            if not self._is_group_welcome_allowed(group_id):
-                return
-
-            # 检查素材是否就绪
-            if not self._assets_ready():
-                logger.error("[headpat] 缺少素材，无法发送欢迎消息")
-                return
-
-            logger.info(f"[headpat] 检测到新成员加入群 {group_id}，用户ID: {user_id}")
-
-            # 尝试从缓存获取
-            if self.patpat_config.get("cache_enabled", True):
-                try:
-                    cached_path = self.cache_service.get(user_id)
-                    if cached_path and cached_path.exists():
-                        logger.info(f"[headpat] 欢迎缓存命中: {user_id}")
-                        yield self._image_result(event, cached_path)
-                        return
-                except Exception as e:
-                    logger.warning(f"[headpat] 读取欢迎缓存失败: {e}")
-
+        # 缓存未命中，生成新的GIF
+        if gif_path is None:
             # 获取头像
             avatar = await self._download_qq_avatar(user_id)
             if avatar is None:
@@ -271,7 +342,9 @@ class HeadpatPlugin(Star):
                 interval = 0.06 / speed
                 transparent_bg = self.patpat_config.get("transparent_background", True)
                 bg_color = self.patpat_config.get("background_color", "#FFFFFF")
-                gif_path = self._build_petpet_gif(avatar, interval, transparent_bg, bg_color)
+                gif_path = self._build_petpet_gif(
+                    avatar, interval, transparent_bg, bg_color
+                )
             except Exception:
                 logger.exception("[headpat] 生成欢迎 GIF 失败")
                 return
@@ -279,14 +352,48 @@ class HeadpatPlugin(Star):
             # 存入缓存
             if self.patpat_config.get("cache_enabled", True):
                 try:
-                    cache_path = self.cache_service.set(user_id, gif_path, avatar_hash)
+                    gif_path = self.cache_service.set(user_id, gif_path, avatar_hash)
                     logger.info(f"[headpat] 欢迎消息已缓存: {user_id}")
-                    yield self._image_result(event, cache_path)
                 except Exception as e:
                     logger.warning(f"[headpat] 缓存欢迎消息失败: {e}")
-                    yield self._image_result(event, gif_path)
-            else:
-                yield self._image_result(event, gif_path)
+
+        # 发送欢迎消息
+        await self._send_group_welcome(group_id, user_id, gif_path)
+
+    async def _send_group_welcome(self, group_id: str, user_id: str, gif_path: Path):
+        """发送群欢迎消息
+
+        Args:
+            group_id: 群号
+            user_id: 新成员QQ号
+            gif_path: GIF文件路径
+        """
+        client = self._get_client()
+        if not client:
+            logger.warning("[headpat] 无法获取客户端，无法发送欢迎消息")
+            return
+
+        try:
+            if not group_id.isdigit() or not user_id.isdigit():
+                return
+
+            # 读取GIF文件为base64
+            with open(gif_path, "rb") as f:
+                gif_data = f.read()
+            gif_b64 = base64.b64encode(gif_data).decode()
+
+            # 构建消息：at新成员 + GIF图片
+            message = [
+                {"type": "at", "data": {"qq": user_id}},
+                {"type": "image", "data": {"file": f"base64://{gif_b64}"}},
+            ]
+
+            await client.api.call_action(
+                "send_group_msg", group_id=int(group_id), message=message
+            )
+            logger.info(f"[headpat] 已发送欢迎消息到群 {group_id}，用户: {user_id}")
+        except Exception as e:
+            logger.error(f"[headpat] 发送欢迎消息异常: {e}")
 
     def _is_at_bot(self, event: AstrMessageEvent, bot_id: str) -> bool:
         """检查消息是否at了机器人"""
@@ -303,7 +410,9 @@ class HeadpatPlugin(Star):
                     return True
         return False
 
-    def _get_target_user_id(self, event: AstrMessageEvent, bot_id: str) -> Optional[str]:
+    def _get_target_user_id(
+        self, event: AstrMessageEvent, bot_id: str
+    ) -> str | None:
         """获取目标用户ID
         规则：
         1. 如果只有一个at（机器人自己），返回机器人ID
@@ -344,16 +453,24 @@ class HeadpatPlugin(Star):
         # 如果都是机器人（理论上不会发生），返回第一个
         return unique_at_list[0]
 
-    async def _resolve_avatar(self, event: AstrMessageEvent, user_id: str) -> Optional[Image.Image]:
+    async def _resolve_avatar(
+        self, event: AstrMessageEvent, user_id: str
+    ) -> Image.Image | None:
         """解析用户头像"""
         candidates = []
 
         # 尝试从event方法获取
-        for name in ("get_user_avatar", "get_avatar", "get_target_avatar", "get_sender_avatar"):
+        for name in (
+            "get_user_avatar",
+            "get_avatar",
+            "get_target_avatar",
+            "get_sender_avatar",
+        ):
             fn = getattr(event, name, None)
             if callable(fn):
                 try:
                     import inspect
+
                     data = fn() if name == "get_sender_avatar" else fn(user_id)
                     if inspect.isawaitable(data):
                         data = await data
@@ -384,7 +501,7 @@ class HeadpatPlugin(Star):
 
         return None
 
-    async def _download_qq_avatar(self, user_id: str) -> Optional[Image.Image]:
+    async def _download_qq_avatar(self, user_id: str) -> Image.Image | None:
         """下载QQ头像"""
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -402,7 +519,7 @@ class HeadpatPlugin(Star):
                     logger.warning(f"[headpat] 获取头像失败 {url}: {e}")
         return None
 
-    def _to_image(self, data: Any) -> Optional[Image.Image]:
+    def _to_image(self, data: Any) -> Image.Image | None:
         """将数据转换为图片"""
         if data is None:
             return None
@@ -431,9 +548,15 @@ class HeadpatPlugin(Star):
                     return None
         return None
 
-    def _build_petpet_gif(self, avatar: Image.Image, interval: float, transparent_bg: bool = True, bg_color: str = "#FFFFFF") -> Path:
+    def _build_petpet_gif(
+        self,
+        avatar: Image.Image,
+        interval: float,
+        transparent_bg: bool = True,
+        bg_color: str = "#FFFFFF",
+    ) -> Path:
         """构建摸头GIF
-        
+
         Args:
             avatar: 用户头像
             interval: 帧间隔
@@ -441,13 +564,13 @@ class HeadpatPlugin(Star):
             bg_color: 背景颜色（十六进制）
         """
         canvas_size = (112, 112)
-        
+
         # 获取配置的头像大小
         avatar_size = self.patpat_config.get("avatar_size", 75)
-        
+
         # 调整头像大小
         avatar = avatar.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
-        
+
         # 如果启用圆形头像，处理为圆形
         if self.patpat_config.get("circular_avatar", False):
             avatar = self._make_circular_avatar(avatar)
@@ -466,7 +589,7 @@ class HeadpatPlugin(Star):
         frames = []
         for i in range(5):
             hand = Image.open(self.assets_dir / f"frame{i}.png").convert("RGBA")
-            
+
             # 创建画布，根据配置决定是否透明
             if transparent_bg:
                 canvas = Image.new("RGBA", canvas_size, (255, 255, 255, 0))
@@ -491,7 +614,7 @@ class HeadpatPlugin(Star):
                 frames.append(canvas.convert("P", palette=Image.Palette.ADAPTIVE))
 
         out_path = self.output_dir / f"petpet_{uuid.uuid4().hex}.gif"
-        
+
         # 透明背景时需要特殊处理以保留alpha通道
         if transparent_bg:
             frames[0].save(
@@ -518,20 +641,20 @@ class HeadpatPlugin(Star):
 
     def _parse_color(self, color_str: str, transparent: bool = False) -> tuple:
         """解析颜色字符串为RGBA元组
-        
+
         Args:
             color_str: 十六进制颜色字符串，如 #FFFFFF
             transparent: 是否透明背景
-            
+
         Returns:
             RGBA元组
         """
         if transparent:
             return (255, 255, 255, 0)
-        
+
         # 移除 # 前缀
         color_str = color_str.lstrip("#")
-        
+
         # 处理不同长度的颜色值
         if len(color_str) == 3:
             # 短格式 #RGB -> #RRGGBB
@@ -546,29 +669,29 @@ class HeadpatPlugin(Star):
         else:
             # 默认白色
             return (255, 255, 255, 255)
-        
+
         return (r, g, b, 255)
 
     def _make_circular_avatar(self, avatar: Image.Image) -> Image.Image:
         """将头像处理为圆形
-        
+
         Args:
             avatar: 原始头像图片
-            
+
         Returns:
             圆形头像图片
         """
         size = avatar.size
-        
+
         # 创建圆形遮罩
         mask = Image.new("L", size, 0)
         draw = ImageDraw.Draw(mask)
         draw.ellipse((0, 0, size[0], size[1]), fill=255)
-        
+
         # 应用遮罩
         circular_avatar = avatar.copy()
         circular_avatar.putalpha(mask)
-        
+
         return circular_avatar
 
     async def _cleanup_gif_loop(self):
@@ -604,7 +727,7 @@ class HeadpatPlugin(Star):
         return event.image_result(str(path))
 
     @staticmethod
-    def _first_attr(obj: Any, keys: tuple[str, ...]) -> Optional[Any]:
+    def _first_attr(obj: Any, keys: tuple[str, ...]) -> Any | None:
         """获取对象的第一个非空属性"""
         if obj is None:
             return None
