@@ -388,18 +388,36 @@ class HeadpatPlugin(Star):
             canvas.paste(squeezed, (x, y))
             canvas = Image.alpha_composite(canvas, hand)
 
-            frames.append(canvas.convert("P", palette=Image.Palette.ADAPTIVE))
+            # 透明背景时保持RGBA模式，非透明背景时转换为P模式
+            if transparent_bg:
+                frames.append(canvas)
+            else:
+                frames.append(canvas.convert("P", palette=Image.Palette.ADAPTIVE))
 
         out_path = self.output_dir / f"petpet_{uuid.uuid4().hex}.gif"
-        frames[0].save(
-            out_path,
-            save_all=True,
-            append_images=frames[1:],
-            duration=max(20, int(interval * 1000)),
-            loop=0,
-            optimize=False,
-            disposal=2,
-        )
+        
+        # 透明背景时需要特殊处理以保留alpha通道
+        if transparent_bg:
+            frames[0].save(
+                out_path,
+                save_all=True,
+                append_images=frames[1:],
+                duration=max(20, int(interval * 1000)),
+                loop=0,
+                optimize=False,
+                disposal=2,
+                transparency=0,
+            )
+        else:
+            frames[0].save(
+                out_path,
+                save_all=True,
+                append_images=frames[1:],
+                duration=max(20, int(interval * 1000)),
+                loop=0,
+                optimize=False,
+                disposal=2,
+            )
         return out_path
 
     def _parse_color(self, color_str: str, transparent: bool = False) -> tuple:
