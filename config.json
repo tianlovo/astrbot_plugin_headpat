@@ -3,7 +3,6 @@
     "enable": true,
     "speed": 1.0,
     "cooldown_seconds": 3.0,
-    "reply_text": "轻轻摸了摸你的头~",
     "allowed_groups": [],
     "transparent_background": true,
     "background_color": "#FFFFFF",

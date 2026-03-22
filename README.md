@@ -71,7 +71,6 @@ AstrBot 摸头杀插件 - at机器人发送"摸头"命令生成个性化摸头GI
 | `enable` | bool | true | 是否启用摸头功能 |
 | `speed` | float | 1.0 | 摸头动画速度，值越大越快（建议 0.5 ~ 3.0） |
 | `cooldown_seconds` | float | 3.0 | 冷却时间（秒），防止刷屏 |
-| `reply_text` | text | "轻轻摸了摸你的头~" | 摸头回复文本 |
 | `allowed_groups` | list | [] | 允许使用功能的QQ群列表，为空则允许所有群 |
 | `transparent_background` | bool | true | 是否启用透明背景 |
 | `background_color` | string | "#FFFFFF" | 背景颜色（十六进制），不启用透明背景时生效 |
