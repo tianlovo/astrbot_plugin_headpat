@@ -61,8 +61,12 @@ class HeadpatPlugin(Star):
         logger.info("[headpat] 插件已加载，定时清理任务已启动")
 
     @filter.on_plugin_unloaded()
-    async def on_plugin_unloaded(self):
-        """插件卸载时清理资源"""
+    async def on_plugin_unloaded(self, metadata):
+        """插件卸载时清理资源
+        
+        Args:
+            metadata: 插件元数据
+        """
         # 停止旧版清理任务
         if self._cleanup_task and not self._cleanup_task.done():
             self._cleanup_task.cancel()
