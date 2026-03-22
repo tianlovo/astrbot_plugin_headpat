@@ -25,7 +25,7 @@ QQ_AVATAR_URLS = [
 COMMAND_ALIASES = {"摸摸", "摸", "摸头杀"}
 
 
-@register("astrbot_plugin_headpat", "tianluoqaq", "摸头杀插件 - at机器人后发送摸头命令生成GIF", "1.3.1")
+@register("astrbot_plugin_headpat", "tianluoqaq", "摸头杀插件 - at机器人后发送摸头命令生成GIF", "1.3.2")
 class HeadpatPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -191,6 +191,102 @@ class HeadpatPlugin(Star):
         if not allowed_groups:
             return True
         return group_id in allowed_groups
+
+    def _is_group_welcome_allowed(self, group_id: str) -> bool:
+        """检查群是否允许使用欢迎功能"""
+        welcome_groups = self.patpat_config.get("welcome_groups", [])
+        if not welcome_groups:
+            return True
+        return group_id in welcome_groups
+
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    async def on_group_event(self, event: AstrMessageEvent):
+        """处理群事件，包括成员加入"""
+        # 检查欢迎功能是否开启
+        if not self.patpat_config.get("welcome_on_join", False):
+            return
+
+        # 获取消息对象
+        msg_obj = getattr(event, "message_obj", None)
+        if not msg_obj:
+            return
+
+        # 获取 raw_message 检查是否为 group_increase 事件
+        raw_msg = getattr(msg_obj, "raw_message", None)
+        if not raw_msg:
+            return
+
+        # 检查是否为 group_increase 事件
+        if isinstance(raw_msg, dict):
+            post_type = raw_msg.get("post_type")
+            notice_type = raw_msg.get("notice_type")
+            if post_type != "notice" or notice_type != "group_increase":
+                return
+
+            # 获取群号和新成员ID
+            group_id = str(raw_msg.get("group_id", ""))
+            user_id = str(raw_msg.get("user_id", ""))
+
+            if not group_id or not user_id:
+                return
+
+            # 检查群是否允许欢迎功能
+            if not self._is_group_welcome_allowed(group_id):
+                return
+
+            # 检查素材是否就绪
+            if not self._assets_ready():
+                logger.error("[headpat] 缺少素材，无法发送欢迎消息")
+                return
+
+            logger.info(f"[headpat] 检测到新成员加入群 {group_id}，用户ID: {user_id}")
+
+            # 尝试从缓存获取
+            if self.patpat_config.get("cache_enabled", True):
+                try:
+                    cached_path = self.cache_service.get(user_id)
+                    if cached_path and cached_path.exists():
+                        logger.info(f"[headpat] 欢迎缓存命中: {user_id}")
+                        yield self._image_result(event, cached_path)
+                        return
+                except Exception as e:
+                    logger.warning(f"[headpat] 读取欢迎缓存失败: {e}")
+
+            # 获取头像
+            avatar = await self._download_qq_avatar(user_id)
+            if avatar is None:
+                logger.warning(f"[headpat] 无法获取新成员头像: {user_id}")
+                return
+
+            # 计算头像哈希用于存储缓存
+            avatar_hash = None
+            try:
+                avatar_hash = self._calculate_avatar_hash(avatar)
+            except Exception as e:
+                logger.warning(f"[headpat] 计算头像哈希失败: {e}")
+
+            # 生成GIF
+            try:
+                speed = float(self.patpat_config.get("speed", 1.0))
+                interval = 0.06 / speed
+                transparent_bg = self.patpat_config.get("transparent_background", True)
+                bg_color = self.patpat_config.get("background_color", "#FFFFFF")
+                gif_path = self._build_petpet_gif(avatar, interval, transparent_bg, bg_color)
+            except Exception:
+                logger.exception("[headpat] 生成欢迎 GIF 失败")
+                return
+
+            # 存入缓存
+            if self.patpat_config.get("cache_enabled", True):
+                try:
+                    cache_path = self.cache_service.set(user_id, gif_path, avatar_hash)
+                    logger.info(f"[headpat] 欢迎消息已缓存: {user_id}")
+                    yield self._image_result(event, cache_path)
+                except Exception as e:
+                    logger.warning(f"[headpat] 缓存欢迎消息失败: {e}")
+                    yield self._image_result(event, gif_path)
+            else:
+                yield self._image_result(event, gif_path)
 
     def _is_at_bot(self, event: AstrMessageEvent, bot_id: str) -> bool:
         """检查消息是否at了机器人"""

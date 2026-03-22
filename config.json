@@ -13,6 +13,8 @@
     "cleanup_interval": 3600,
     "cleanup_on_startup": false,
     "avatar_size": 75,
-    "circular_avatar": false
+    "circular_avatar": false,
+    "welcome_on_join": false,
+    "welcome_groups": []
   }
 }
