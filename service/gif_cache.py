@@ -81,14 +81,14 @@ class GifCacheService:
         logger.info(f"[{plugin_name}] GIF缓存服务初始化完成，缓存目录: {self.cache_dir}")
     
     def _get_cache_dir(self) -> Path:
-        """获取缓存目录路径，遵守 AstrBot 存储规范
+        """获取缓存目录路径，遵守 Astr Bot 存储规范
         
         Returns:
             缓存目录路径: data/plugin_data/{plugin_name}/gif_cache/
         """
         if get_astrbot_data_path:
             # AstrBot >= 4.9.2
-            base_path = get_astrbot_data_path()
+            base_path = Path(get_astrbot_data_path())
         else:
             # 兼容旧版本，使用插件目录
             base_path = Path(__file__).resolve().parent.parent.parent
