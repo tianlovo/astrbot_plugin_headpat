@@ -43,6 +43,18 @@
         "type": "list",
         "default": [],
         "hint": "只有在列表中的群才能触发摸头功能，为空则允许所有群"
+      },
+      "transparent_background": {
+        "description": "启用透明背景",
+        "type": "bool",
+        "default": true,
+        "hint": "启用后GIF背景为透明，不启用时可指定背景颜色"
+      },
+      "background_color": {
+        "description": "背景颜色",
+        "type": "string",
+        "default": "#FFFFFF",
+        "hint": "当不启用透明背景时，使用此颜色作为背景。支持十六进制颜色值，如 #FFFFFF（白色）、#000000（黑色）"
       }
     }
   }

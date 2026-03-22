@@ -22,7 +22,7 @@ QQ_AVATAR_URLS = [
 COMMAND_ALIASES = {"摸摸", "摸", "摸头杀"}
 
 
-@register("astrbot_plugin_headpat", "tianluoqaq", "摸头杀插件 - at机器人后发送摸头命令生成GIF", "1.2.0")
+@register("astrbot_plugin_headpat", "tianluoqaq", "摸头杀插件 - at机器人后发送摸头命令生成GIF", "1.2.1")
 class HeadpatPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -91,7 +91,9 @@ class HeadpatPlugin(Star):
         try:
             speed = float(self.patpat_config.get("speed", 1.0))
             interval = 0.06 / speed
-            gif_path = self._build_petpet_gif(avatar, interval)
+            transparent_bg = self.patpat_config.get("transparent_background", True)
+            bg_color = self.patpat_config.get("background_color", "#FFFFFF")
+            gif_path = self._build_petpet_gif(avatar, interval, transparent_bg, bg_color)
         except Exception:
             logger.exception("[headpat] 生成 GIF 失败")
             yield event.plain_result("生成摸头 GIF 失败，请稍后再试。")
@@ -250,8 +252,15 @@ class HeadpatPlugin(Star):
                     return None
         return None
 
-    def _build_petpet_gif(self, avatar: Image.Image, interval: float) -> Path:
-        """构建摸头GIF"""
+    def _build_petpet_gif(self, avatar: Image.Image, interval: float, transparent_bg: bool = True, bg_color: str = "#FFFFFF") -> Path:
+        """构建摸头GIF
+        
+        Args:
+            avatar: 用户头像
+            interval: 帧间隔
+            transparent_bg: 是否使用透明背景
+            bg_color: 背景颜色（十六进制）
+        """
         canvas_size = (112, 112)
         avatar_size = 75
         avatar = avatar.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
@@ -264,10 +273,18 @@ class HeadpatPlugin(Star):
             (1.0, 1.0, 0, 0),
         ]
 
+        # 解析背景颜色
+        bg_rgba = self._parse_color(bg_color, transparent_bg)
+
         frames = []
         for i in range(5):
             hand = Image.open(self.assets_dir / f"frame{i}.png").convert("RGBA")
-            canvas = Image.new("RGBA", canvas_size, (255, 255, 255, 0))
+            
+            # 创建画布，根据配置决定是否透明
+            if transparent_bg:
+                canvas = Image.new("RGBA", canvas_size, (255, 255, 255, 0))
+            else:
+                canvas = Image.new("RGBA", canvas_size, bg_rgba)
 
             sx, sy, ox, oy = squeeze_data[i]
             w = int(avatar_size * sx)
@@ -293,6 +310,39 @@ class HeadpatPlugin(Star):
             disposal=2,
         )
         return out_path
+
+    def _parse_color(self, color_str: str, transparent: bool = False) -> tuple:
+        """解析颜色字符串为RGBA元组
+        
+        Args:
+            color_str: 十六进制颜色字符串，如 #FFFFFF
+            transparent: 是否透明背景
+            
+        Returns:
+            RGBA元组
+        """
+        if transparent:
+            return (255, 255, 255, 0)
+        
+        # 移除 # 前缀
+        color_str = color_str.lstrip("#")
+        
+        # 处理不同长度的颜色值
+        if len(color_str) == 3:
+            # 短格式 #RGB -> #RRGGBB
+            r = int(color_str[0] * 2, 16)
+            g = int(color_str[1] * 2, 16)
+            b = int(color_str[2] * 2, 16)
+        elif len(color_str) == 6:
+            # 标准格式 #RRGGBB
+            r = int(color_str[0:2], 16)
+            g = int(color_str[2:4], 16)
+            b = int(color_str[4:6], 16)
+        else:
+            # 默认白色
+            return (255, 255, 255, 255)
+        
+        return (r, g, b, 255)
 
     async def _cleanup_gif_loop(self):
         """定时清理GIF文件"""
