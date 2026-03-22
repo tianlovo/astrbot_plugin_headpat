@@ -14,7 +14,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
-from service import GifCacheService
+from .service import GifCacheService
 
 
 QQ_AVATAR_URLS = [
