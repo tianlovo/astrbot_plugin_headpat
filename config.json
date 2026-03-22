@@ -1,4 +1,9 @@
 {
-  "trigger": "摸摸",
-  "interval": 0.06
+  "patpat": {
+    "enable": true,
+    "speed": 1.0,
+    "cooldown_seconds": 3.0,
+    "reply_text": "轻轻摸了摸你的头~",
+    "allowed_groups": []
+  }
 }

@@ -1,9 +1,6 @@
 import asyncio
 import base64
-import inspect
 import io
-import json
-import re
 import time
 import uuid
 from pathlib import Path
@@ -17,197 +14,165 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
 
-DEFAULT_CONFIG = {
-    "trigger": "摸摸",
-    "interval": 0.04,
-}
-
 QQ_AVATAR_URLS = [
     "https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640&img_type=jpg",
     "https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640",
 ]
 
+COMMAND_ALIASES = {"摸摸", "摸", "摸头杀"}
 
-@register("astrbot_plugin_petpet", "codex", "摸头杀 petpet GIF 插件", "1.0.0")
-class PetPetPlugin(Star):
-    def __init__(self, context: Context):
+
+@register("astrbot_plugin_headpat", "tianluoqaq", "摸头杀插件 - at机器人后发送摸头命令生成GIF", "1.2.0")
+class HeadpatPlugin(Star):
+    def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
+        self.config = config or {}
+        self.patpat_config = self.config.get("patpat", {})
         self.base_dir = Path(__file__).resolve().parent
         self.assets_dir = self.base_dir / "data" / "petpet"
         self.output_dir = self.assets_dir / "output"
-        self.config_path = self.base_dir / "config.json"
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.config = self._load_or_create_config()
         self._cleanup_task: Optional[asyncio.Task] = None
 
     @filter.on_astrbot_loaded()
     async def on_astrbot_loaded(self):
         if self._cleanup_task is None or self._cleanup_task.done():
             self._cleanup_task = asyncio.create_task(self._cleanup_gif_loop())
-        logger.info("[petpet] 插件已加载，定时清理任务已启动")
+        logger.info("[headpat] 插件已加载，定时清理任务已启动")
 
-    @filter.event_message_type(filter.EventMessageType.ALL)
-    async def on_message(self, event: AstrMessageEvent, *args, **kwargs):
-        text = self._get_text(event).strip()
-        if not text:
+    @filter.command("摸头", alias={"摸摸", "摸", "摸头杀"})
+    async def headpat_command(self, event: AstrMessageEvent):
+        '''摸头命令 - at机器人后发送摸头命令生成个性化摸头GIF
+        别名: 摸摸、摸、摸头杀
+        用法: @机器人 摸头 @目标用户
+        如果只@机器人，则生成机器人自己的摸头GIF
+        '''
+        # 检查插件是否启用
+        if not self.patpat_config.get("enable", True):
             return
 
-        if text.startswith(".petset"):
-            if not await self._is_admin_or_owner(event):
-                yield event.plain_result("你没有权限使用该命令（仅机器人管理员或群主）。")
-                return
-            msg = self._handle_petset(text)
-            yield event.plain_result(msg)
+        # 获取消息对象
+        msg_obj = getattr(event, "message_obj", None)
+        if not msg_obj:
             return
 
-        trigger = str(self.config.get("trigger", DEFAULT_CONFIG["trigger"])).strip()
-        if not (text == trigger or text.startswith(trigger + " ")):
+        # 获取群号并检查白名单
+        group_id = getattr(msg_obj, "group_id", "")
+        if group_id and not self._is_group_allowed(str(group_id)):
             return
 
-        if not self._assets_ready():
-            logger.error("[petpet] 缺少素材，请检查 data/petpet/frame0.png ~ frame4.png")
-            yield event.plain_result("petpet 素材缺失，请联系管理员检查插件目录下 data/petpet/frame0~4.png")
+        # 获取机器人ID
+        bot_id = getattr(msg_obj, "self_id", "")
+
+        # 检查是否at了机器人
+        if not self._is_at_bot(event, bot_id):
+            yield event.plain_result("请at机器人后使用摸头命令~")
             return
 
-        target_user_id = self._resolve_target_user_id(event)
+        # 获取目标用户ID
+        target_user_id = self._get_target_user_id(event, bot_id)
         if not target_user_id:
-            yield event.plain_result("无法识别用户，请稍后再试。")
+            yield event.plain_result("无法识别目标用户，请稍后再试。")
             return
 
+        # 检查素材是否就绪
+        if not self._assets_ready():
+            logger.error("[headpat] 缺少素材，请检查 data/petpet/frame0.png ~ frame4.png")
+            yield event.plain_result("摸头素材缺失，请联系管理员检查插件目录下 data/petpet/frame0~4.png")
+            return
+
+        # 获取头像
         avatar = await self._resolve_avatar(event, target_user_id)
         if avatar is None:
             yield event.plain_result("未能获取目标头像，请稍后再试。")
             return
 
+        # 生成GIF
         try:
-            gif_path = self._build_petpet_gif(avatar, float(self.config["interval"]))
+            speed = float(self.patpat_config.get("speed", 1.0))
+            interval = 0.06 / speed
+            gif_path = self._build_petpet_gif(avatar, interval)
         except Exception:
-            logger.exception("[petpet] 生成 GIF 失败")
-            yield event.plain_result("生成 petpet GIF 失败，请稍后再试。")
+            logger.exception("[headpat] 生成 GIF 失败")
+            yield event.plain_result("生成摸头 GIF 失败，请稍后再试。")
             return
 
+        # 发送结果
         yield self._image_result(event, gif_path)
 
-    def _load_or_create_config(self) -> dict:
-        cfg = dict(DEFAULT_CONFIG)
-        if self.config_path.exists():
-            try:
-                loaded = json.loads(self.config_path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    cfg.update(loaded)
-            except Exception:
-                logger.exception("[petpet] 读取 config.json 失败，将使用默认配置")
-        self._normalize_and_save_config(cfg)
-        return self.config
-
-    def _normalize_and_save_config(self, cfg: dict):
-        trigger = str(cfg.get("trigger", DEFAULT_CONFIG["trigger"])).strip() or DEFAULT_CONFIG["trigger"]
-        try:
-            interval = float(cfg.get("interval", DEFAULT_CONFIG["interval"]))
-        except Exception:
-            interval = DEFAULT_CONFIG["interval"]
-        interval = max(0.02, min(1.0, interval))
-        self.config = {"trigger": trigger, "interval": interval}
-        self.config_path.write_text(json.dumps(self.config, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    def _handle_petset(self, text: str) -> str:
-        m = re.match(r"^\.petset\s+(速度|指令)\s+(.+?)\s*$", text)
-        if not m:
-            return "用法：.petset 速度 0.06 或 .petset 指令 揉揉"
-        key, value = m.group(1), m.group(2).strip()
-        if key == "速度":
-            try:
-                interval = float(value)
-            except Exception:
-                return "速度必须是数字，例如：.petset 速度 0.06"
-            if interval <= 0:
-                return "速度必须大于 0。"
-            self.config["interval"] = interval
-            self._normalize_and_save_config(self.config)
-            return f"已设置摸头速度（帧间隔）为 {self.config['interval']:.3f}s"
-        if not value:
-            return "触发词不能为空。"
-        self.config["trigger"] = value
-        self._normalize_and_save_config(self.config)
-        return f"已设置触发词为：{self.config['trigger']}"
-
-    async def _is_admin_or_owner(self, event: AstrMessageEvent) -> bool:
-        sender = getattr(getattr(event, "message_obj", None), "sender", None)
-        role = str(getattr(sender, "role", "")).lower()
-        if role in {"owner", "admin"}:
+    def _is_group_allowed(self, group_id: str) -> bool:
+        """检查群是否允许使用摸头功能"""
+        allowed_groups = self.patpat_config.get("allowed_groups", [])
+        if not allowed_groups:
             return True
+        return group_id in allowed_groups
 
-        for name in ("is_admin", "is_owner"):
-            checker = getattr(event, name, None)
-            if callable(checker):
-                try:
-                    ret = checker()
-                    if inspect.isawaitable(ret):
-                        ret = await ret
-                    if bool(ret):
-                        return True
-                except Exception:
-                    continue
+    def _is_at_bot(self, event: AstrMessageEvent, bot_id: str) -> bool:
+        """检查消息是否at了机器人"""
+        msg_obj = getattr(event, "message_obj", None)
+        if not msg_obj:
+            return False
+
+        chain = getattr(msg_obj, "message", None) or []
+        for seg in chain:
+            seg_type = seg.__class__.__name__.lower()
+            if seg_type == "at":
+                target_id = self._first_attr(seg, ("qq", "user_id", "id", "target"))
+                if target_id and str(target_id) == str(bot_id):
+                    return True
         return False
 
-    def _resolve_target_user_id(self, event: AstrMessageEvent) -> Optional[str]:
+    def _get_target_user_id(self, event: AstrMessageEvent, bot_id: str) -> Optional[str]:
+        """获取目标用户ID
+        规则：
+        1. 如果只有一个at（机器人自己），返回机器人ID
+        2. 如果有多个at，返回第二个at的用户ID（非机器人）
+        """
         msg_obj = getattr(event, "message_obj", None)
+        if not msg_obj:
+            return None
+
         chain = getattr(msg_obj, "message", None) or []
-        at_uid = None
-        reply_uid = None
+        at_list = []
 
         for seg in chain:
-            t = seg.__class__.__name__.lower()
-            if t == "at" and at_uid is None:
-                at_uid = self._first_attr(seg, ("qq", "user_id", "id", "target"))
-            if t in {"reply", "quote"} and reply_uid is None:
-                reply_uid = self._first_attr(seg, ("user_id", "qq", "id", "target"))
+            seg_type = seg.__class__.__name__.lower()
+            if seg_type == "at":
+                target_id = self._first_attr(seg, ("qq", "user_id", "id", "target"))
+                if target_id:
+                    at_list.append(str(target_id))
 
-        if reply_uid is None:
-            raw = getattr(msg_obj, "raw_message", None)
-            reply_uid = self._extract_reply_uid(raw)
+        # 去重保持顺序
+        unique_at_list = []
+        for at_id in at_list:
+            if at_id not in unique_at_list:
+                unique_at_list.append(at_id)
 
-        if at_uid:
-            return str(at_uid)
-        if reply_uid:
-            return str(reply_uid)
-        
-        sender = getattr(msg_obj, "sender", None)
-        sender_id = self._first_attr(sender, ("user_id", "id", "qq"))
-        if sender_id:
-            return str(sender_id)
-        
-        return None
-
-    def _extract_reply_uid(self, raw: Any) -> Optional[str]:
-        if not isinstance(raw, dict):
+        if not unique_at_list:
             return None
-        paths = [
-            ("reply", "user_id"),
-            ("reply", "sender_id"),
-            ("reply", "sender", "user_id"),
-            ("quote", "user_id"),
-            ("quote", "sender", "user_id"),
-            ("reference", "author", "id"),
-        ]
-        for p in paths:
-            cur = raw
-            ok = True
-            for key in p:
-                if not isinstance(cur, dict) or key not in cur:
-                    ok = False
-                    break
-                cur = cur[key]
-            if ok and cur:
-                return str(cur)
-        return None
+
+        if len(unique_at_list) == 1:
+            # 只有一个at，返回该用户（应该是机器人自己）
+            return unique_at_list[0]
+
+        # 有多个at，找到第二个at（非机器人）
+        for at_id in unique_at_list:
+            if at_id != str(bot_id):
+                return at_id
+
+        # 如果都是机器人（理论上不会发生），返回第一个
+        return unique_at_list[0]
 
     async def _resolve_avatar(self, event: AstrMessageEvent, user_id: str) -> Optional[Image.Image]:
+        """解析用户头像"""
         candidates = []
+
+        # 尝试从event方法获取
         for name in ("get_user_avatar", "get_avatar", "get_target_avatar", "get_sender_avatar"):
             fn = getattr(event, name, None)
             if callable(fn):
                 try:
+                    import inspect
                     data = fn() if name == "get_sender_avatar" else fn(user_id)
                     if inspect.isawaitable(data):
                         data = await data
@@ -215,7 +180,9 @@ class PetPetPlugin(Star):
                 except Exception:
                     continue
 
-        sender = getattr(getattr(event, "message_obj", None), "sender", None)
+        # 尝试从sender对象获取
+        msg_obj = getattr(event, "message_obj", None)
+        sender = getattr(msg_obj, "sender", None)
         sender_uid = self._first_attr(sender, ("user_id", "id"))
         if sender and sender_uid and str(sender_uid) == str(user_id):
             for k in ("avatar", "avatar_url", "face", "icon"):
@@ -223,18 +190,21 @@ class PetPetPlugin(Star):
                 if v:
                     candidates.append(v)
 
+        # 尝试转换为图片
         for data in candidates:
             img = self._to_image(data)
             if img is not None:
                 return img.convert("RGBA")
-        
+
+        # 尝试下载QQ头像
         img = await self._download_qq_avatar(user_id)
         if img is not None:
             return img
-        
+
         return None
-    
+
     async def _download_qq_avatar(self, user_id: str) -> Optional[Image.Image]:
+        """下载QQ头像"""
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
@@ -245,13 +215,14 @@ class PetPetPlugin(Star):
                     resp = await client.get(url, headers=headers, follow_redirects=True)
                     if resp.status_code == 200 and len(resp.content) > 0:
                         img = Image.open(io.BytesIO(resp.content))
-                        logger.info(f"[petpet] 从QQ头像API获取头像成功: {user_id}")
+                        logger.info(f"[headpat] 从QQ头像API获取头像成功: {user_id}")
                         return img.convert("RGBA")
                 except Exception as e:
-                    logger.warning(f"[petpet] 获取头像失败 {url}: {e}")
+                    logger.warning(f"[headpat] 获取头像失败 {url}: {e}")
         return None
 
     def _to_image(self, data: Any) -> Optional[Image.Image]:
+        """将数据转换为图片"""
         if data is None:
             return None
         if isinstance(data, Image.Image):
@@ -280,10 +251,11 @@ class PetPetPlugin(Star):
         return None
 
     def _build_petpet_gif(self, avatar: Image.Image, interval: float) -> Path:
+        """构建摸头GIF"""
         canvas_size = (112, 112)
         avatar_size = 75
         avatar = avatar.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
-        
+
         squeeze_data = [
             (1.0, 1.0, 0, 0),
             (1.0, 0.9, 0, 3),
@@ -291,25 +263,25 @@ class PetPetPlugin(Star):
             (1.0, 0.9, 0, 3),
             (1.0, 1.0, 0, 0),
         ]
-        
+
         frames = []
         for i in range(5):
             hand = Image.open(self.assets_dir / f"frame{i}.png").convert("RGBA")
             canvas = Image.new("RGBA", canvas_size, (255, 255, 255, 0))
-            
+
             sx, sy, ox, oy = squeeze_data[i]
             w = int(avatar_size * sx)
             h = int(avatar_size * sy)
             squeezed = avatar.resize((w, h), Image.Resampling.LANCZOS)
-            
+
             x = (canvas_size[0] - w) // 2 + ox
             y = (canvas_size[1] - h) // 2 + oy
-            
+
             canvas.paste(squeezed, (x, y))
             canvas = Image.alpha_composite(canvas, hand)
-            
+
             frames.append(canvas.convert("P", palette=Image.Palette.ADAPTIVE))
-        
+
         out_path = self.output_dir / f"petpet_{uuid.uuid4().hex}.gif"
         frames[0].save(
             out_path,
@@ -323,14 +295,16 @@ class PetPetPlugin(Star):
         return out_path
 
     async def _cleanup_gif_loop(self):
+        """定时清理GIF文件"""
         while True:
             try:
                 self._cleanup_old_gifs(max_age_seconds=6 * 3600)
             except Exception:
-                logger.exception("[petpet] 定时清理失败")
+                logger.exception("[headpat] 定时清理失败")
             await asyncio.sleep(3600)
 
     def _cleanup_old_gifs(self, max_age_seconds: int):
+        """清理过期的GIF文件"""
         now = time.time()
         for f in self.output_dir.glob("petpet_*.gif"):
             try:
@@ -340,9 +314,11 @@ class PetPetPlugin(Star):
                 continue
 
     def _assets_ready(self) -> bool:
+        """检查素材是否就绪"""
         return all((self.assets_dir / f"frame{i}.png").exists() for i in range(5))
 
     def _image_result(self, event: AstrMessageEvent, path: Path):
+        """生成图片结果"""
         if hasattr(event, "make_result"):
             result = event.make_result()
             if hasattr(result, "image"):
@@ -350,16 +326,9 @@ class PetPetPlugin(Star):
                 return result
         return event.image_result(str(path))
 
-    def _get_text(self, event: AstrMessageEvent) -> str:
-        v = getattr(event, "message_str", None)
-        if isinstance(v, str):
-            return v
-        msg_obj = getattr(event, "message_obj", None)
-        v2 = getattr(msg_obj, "message_str", "")
-        return v2 if isinstance(v2, str) else ""
-
     @staticmethod
     def _first_attr(obj: Any, keys: tuple[str, ...]) -> Optional[Any]:
+        """获取对象的第一个非空属性"""
         if obj is None:
             return None
         for k in keys:

@@ -37,8 +37,13 @@
         "type": "text",
         "default": "轻轻摸了摸你的头~",
         "hint": "执行摸头动作时回复的消息内容，可使用变量 {user} 表示被摸用户昵称"
+      },
+      "allowed_groups": {
+        "description": "允许使用摸头功能的QQ群列表",
+        "type": "list",
+        "default": [],
+        "hint": "只有在列表中的群才能触发摸头功能，为空则允许所有群"
       }
     }
   }
 }
-
