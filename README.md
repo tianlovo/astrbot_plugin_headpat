@@ -80,6 +80,8 @@ AstrBot 摸头杀插件 - at机器人发送"摸头"命令生成个性化摸头GI
 | `auto_cleanup` | bool | true | 是否启用自动过期清理 |
 | `cleanup_interval` | int | 3600 | 自动清理间隔（秒），默认1小时 |
 | `cleanup_on_startup` | bool | false | 启动时是否执行一次过期缓存清理 |
+| `avatar_size` | int | 75 | 头像大小（像素），建议范围 50 ~ 100 |
+| `circular_avatar` | bool | false | 是否将头像处理为圆形 |
 
 ### QQ群白名单配置
 

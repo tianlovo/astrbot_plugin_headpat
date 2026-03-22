@@ -85,6 +85,23 @@
         "type": "bool",
         "default": false,
         "hint": "启用后，插件启动时会执行一次过期缓存清理"
+      },
+      "avatar_size": {
+        "description": "头像大小",
+        "type": "int",
+        "default": 75,
+        "hint": "用户头像在GIF中的大小（像素）。建议范围：50 ~ 100",
+        "slider": {
+          "min": 50,
+          "max": 100,
+          "step": 5
+        }
+      },
+      "circular_avatar": {
+        "description": "圆形头像",
+        "type": "bool",
+        "default": false,
+        "hint": "启用后，将用户头像处理为圆形"
       }
     }
   }

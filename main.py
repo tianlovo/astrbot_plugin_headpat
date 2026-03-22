@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import httpx
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -25,7 +25,7 @@ QQ_AVATAR_URLS = [
 COMMAND_ALIASES = {"摸摸", "摸", "摸头杀"}
 
 
-@register("astrbot_plugin_headpat", "tianluoqaq", "摸头杀插件 - at机器人后发送摸头命令生成GIF", "1.3.0")
+@register("astrbot_plugin_headpat", "tianluoqaq", "摸头杀插件 - at机器人后发送摸头命令生成GIF", "1.3.1")
 class HeadpatPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -345,8 +345,16 @@ class HeadpatPlugin(Star):
             bg_color: 背景颜色（十六进制）
         """
         canvas_size = (112, 112)
-        avatar_size = 75
+        
+        # 获取配置的头像大小
+        avatar_size = self.patpat_config.get("avatar_size", 75)
+        
+        # 调整头像大小
         avatar = avatar.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
+        
+        # 如果启用圆形头像，处理为圆形
+        if self.patpat_config.get("circular_avatar", False):
+            avatar = self._make_circular_avatar(avatar)
 
         squeeze_data = [
             (1.0, 1.0, 0, 0),
@@ -426,6 +434,28 @@ class HeadpatPlugin(Star):
             return (255, 255, 255, 255)
         
         return (r, g, b, 255)
+
+    def _make_circular_avatar(self, avatar: Image.Image) -> Image.Image:
+        """将头像处理为圆形
+        
+        Args:
+            avatar: 原始头像图片
+            
+        Returns:
+            圆形头像图片
+        """
+        size = avatar.size
+        
+        # 创建圆形遮罩
+        mask = Image.new("L", size, 0)
+        draw = ImageDraw.Draw(mask)
+        draw.ellipse((0, 0, size[0], size[1]), fill=255)
+        
+        # 应用遮罩
+        circular_avatar = avatar.copy()
+        circular_avatar.putalpha(mask)
+        
+        return circular_avatar
 
     async def _cleanup_gif_loop(self):
         """定时清理GIF文件"""

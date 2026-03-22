@@ -11,6 +11,8 @@
     "max_cache_size": 100,
     "auto_cleanup": true,
     "cleanup_interval": 3600,
-    "cleanup_on_startup": false
+    "cleanup_on_startup": false,
+    "avatar_size": 75,
+    "circular_avatar": false
   }
 }
