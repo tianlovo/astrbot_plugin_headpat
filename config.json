@@ -6,6 +6,12 @@
     "reply_text": "轻轻摸了摸你的头~",
     "allowed_groups": [],
     "transparent_background": true,
-    "background_color": "#FFFFFF"
+    "background_color": "#FFFFFF",
+    "cache_enabled": true,
+    "cache_ttl": 3600,
+    "max_cache_size": 100,
+    "auto_cleanup": true,
+    "cleanup_interval": 3600,
+    "cleanup_on_startup": false
   }
 }

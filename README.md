@@ -10,6 +10,7 @@ AstrBot 摸头杀插件 - at机器人发送"摸头"命令生成个性化摸头GI
 - 👥 **智能识别**: 多at时自动识别目标用户，单at时生成机器人自己的摸头gif
 - ⚙️ **群白名单**: 支持配置允许使用功能的QQ群列表
 - 🎨 **透明背景**: 默认启用透明背景，支持自定义背景颜色
+- 💾 **GIF缓存**: 智能缓存机制，避免重复生成，提高响应速度
 - ✨ **精美动画**: 5帧流畅动画，包含手部和挤压效果
 
 ## 依赖
@@ -74,6 +75,12 @@ AstrBot 摸头杀插件 - at机器人发送"摸头"命令生成个性化摸头GI
 | `allowed_groups` | list | [] | 允许使用功能的QQ群列表，为空则允许所有群 |
 | `transparent_background` | bool | true | 是否启用透明背景 |
 | `background_color` | string | "#FFFFFF" | 背景颜色（十六进制），不启用透明背景时生效 |
+| `cache_enabled` | bool | true | 是否启用GIF缓存 |
+| `cache_ttl` | int | 3600 | 缓存有效期（秒），默认1小时，0或负数表示永不过期 |
+| `max_cache_size` | int | 100 | 最大缓存文件数量，超过时按LRU策略清理 |
+| `auto_cleanup` | bool | true | 是否启用自动过期清理 |
+| `cleanup_interval` | int | 3600 | 自动清理间隔（秒），默认1小时 |
+| `cleanup_on_startup` | bool | false | 启动时是否执行一次过期缓存清理 |
 
 ### QQ群白名单配置
 
@@ -104,14 +111,70 @@ AstrBot 摸头杀插件 - at机器人发送"摸头"命令生成个性化摸头GI
 }
 ```
 
+### GIF缓存配置
+
+缓存功能默认启用，支持以下配置：
+
+```json
+{
+  "cache_enabled": true,
+  "cache_ttl": 3600,
+  "max_cache_size": 100,
+  "auto_cleanup": true,
+  "cleanup_interval": 3600,
+  "cleanup_on_startup": false
+}
+```
+
+**缓存策略说明：**
+- **TTL（生存时间）**: 缓存文件超过TTL时间未访问会被标记为过期
+- **LRU策略**: 当缓存数量达到上限时，自动清理最久未访问的缓存
+- **自动清理**: 定期自动清理过期缓存，可配置间隔
+- **启动清理**: 插件启动时可选择执行一次过期缓存清理
+
+**缓存存储位置：**
+遵守 AstrBot 大文件存储规范，缓存存储于：
+```
+data/plugin_data/astrbot_plugin_headpat/gif_cache/
+```
+
 ## 技术实现
 
 - 使用 Pillow 库本地生成GIF动画
 - 通过 QQ 官方头像 API 获取用户头像
 - 使用 AstrBot 标准命令系统 `@filter.command`
 - 支持命令别名和参数解析
+- GIF缓存服务遵守 AstrBot 大文件存储规范
+
+## 项目结构
+
+```
+astrbot_plugin_headpat/
+├── main.py                 # 主程序
+├── service/                # 服务模块
+│   ├── __init__.py
+│   ├── gif_cache.py       # GIF缓存服务
+│   ├── exceptions.py      # 异常类
+│   └── README.md          # 模块文档
+├── tests/                  # 单元测试
+│   ├── __init__.py
+│   └── test_gif_cache.py  # 缓存服务测试
+├── data/petpet/           # 素材目录
+├── _conf_schema.json      # 配置Schema
+├── config.json            # 默认配置
+└── README.md              # 本文档
+```
 
 ## 更新日志
+
+### v1.3.0 (2026-03-22)
+
+- **新增**: GIF缓存服务模块，提供智能缓存机制
+  - 基于用户ID的缓存存储，遵守 AstrBot 存储规范
+  - 支持TTL过期清理、LRU容量清理、自动定时清理
+  - 可配置的缓存参数（启用/禁用、TTL、容量、清理策略）
+- **新增**: 完整的单元测试覆盖
+- **架构**: 模块化设计，缓存服务与业务逻辑解耦
 
 ### v1.2.1 (2026-03-22)
 

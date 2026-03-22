@@ -1,0 +1,18 @@
+"""
+GIF 缓存服务模块
+
+提供 GIF 资源的缓存管理功能，包括存储、读取、更新和清理机制。
+遵守 AstrBot 大文件存储规范。
+"""
+
+from .gif_cache import GifCacheService
+from .exceptions import CacheError, CacheNotFoundError, CacheExpiredError
+
+__all__ = [
+    "GifCacheService",
+    "CacheError",
+    "CacheNotFoundError",
+    "CacheExpiredError",
+]
+
+__version__ = "1.0.0"

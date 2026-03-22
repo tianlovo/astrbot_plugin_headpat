@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import io
 import time
 import uuid
@@ -13,6 +14,8 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
+from service import GifCacheService
+
 
 QQ_AVATAR_URLS = [
     "https://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640&img_type=jpg",
@@ -22,7 +25,7 @@ QQ_AVATAR_URLS = [
 COMMAND_ALIASES = {"摸摸", "摸", "摸头杀"}
 
 
-@register("astrbot_plugin_headpat", "tianluoqaq", "摸头杀插件 - at机器人后发送摸头命令生成GIF", "1.2.1")
+@register("astrbot_plugin_headpat", "tianluoqaq", "摸头杀插件 - at机器人后发送摸头命令生成GIF", "1.3.0")
 class HeadpatPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -33,12 +36,41 @@ class HeadpatPlugin(Star):
         self.output_dir = self.assets_dir / "output"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._cleanup_task: Optional[asyncio.Task] = None
+        
+        # 初始化GIF缓存服务
+        self.cache_service = GifCacheService("astrbot_plugin_headpat", self.patpat_config)
+        
+        # 如果配置了启动时清理，执行一次过期清理
+        if self.patpat_config.get("cleanup_on_startup", False):
+            try:
+                removed = self.cache_service.clear_expired()
+                if removed > 0:
+                    logger.info(f"[headpat] 启动时清理了 {removed} 个过期缓存")
+            except Exception as e:
+                logger.warning(f"[headpat] 启动时清理缓存失败: {e}")
 
     @filter.on_astrbot_loaded()
     async def on_astrbot_loaded(self):
+        # 启动旧版清理任务（清理临时文件）
         if self._cleanup_task is None or self._cleanup_task.done():
             self._cleanup_task = asyncio.create_task(self._cleanup_gif_loop())
+        
+        # 启动缓存自动清理任务
+        self.cache_service.start_auto_cleanup()
+        
         logger.info("[headpat] 插件已加载，定时清理任务已启动")
+
+    @filter.on_astrbot_unloaded()
+    async def on_astrbot_unloaded(self):
+        """插件卸载时清理资源"""
+        # 停止旧版清理任务
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+        
+        # 停止缓存自动清理任务
+        self.cache_service.stop_auto_cleanup()
+        
+        logger.info("[headpat] 插件已卸载，清理任务已停止")
 
     @filter.command("摸头", alias={"摸摸", "摸", "摸头杀"})
     async def headpat_command(self, event: AstrMessageEvent):
@@ -81,11 +113,43 @@ class HeadpatPlugin(Star):
             yield event.plain_result("摸头素材缺失，请联系管理员检查插件目录下 data/petpet/frame0~4.png")
             return
 
+        # 计算头像哈希用于缓存
+        avatar_hash = None
+        
+        # 尝试从缓存获取
+        if self.patpat_config.get("cache_enabled", True):
+            try:
+                cached_path = self.cache_service.get(target_user_id, avatar_hash)
+                if cached_path and cached_path.exists():
+                    logger.info(f"[headpat] 缓存命中: {target_user_id}")
+                    yield self._image_result(event, cached_path)
+                    return
+            except Exception as e:
+                logger.warning(f"[headpat] 读取缓存失败: {e}")
+
         # 获取头像
         avatar = await self._resolve_avatar(event, target_user_id)
         if avatar is None:
             yield event.plain_result("未能获取目标头像，请稍后再试。")
             return
+        
+        # 计算头像哈希
+        try:
+            avatar_hash = self._calculate_avatar_hash(avatar)
+        except Exception as e:
+            logger.warning(f"[headpat] 计算头像哈希失败: {e}")
+            avatar_hash = None
+        
+        # 再次检查缓存（使用哈希）
+        if self.patpat_config.get("cache_enabled", True) and avatar_hash:
+            try:
+                cached_path = self.cache_service.get(target_user_id, avatar_hash)
+                if cached_path and cached_path.exists():
+                    logger.info(f"[headpat] 缓存命中（带哈希）: {target_user_id}")
+                    yield self._image_result(event, cached_path)
+                    return
+            except Exception as e:
+                logger.warning(f"[headpat] 读取缓存失败: {e}")
 
         # 生成GIF
         try:
@@ -99,8 +163,36 @@ class HeadpatPlugin(Star):
             yield event.plain_result("生成摸头 GIF 失败，请稍后再试。")
             return
 
-        # 发送结果
-        yield self._image_result(event, gif_path)
+        # 存入缓存
+        if self.patpat_config.get("cache_enabled", True):
+            try:
+                cache_path = self.cache_service.set(target_user_id, gif_path, avatar_hash)
+                logger.info(f"[headpat] 已缓存: {target_user_id}")
+                # 使用缓存路径发送
+                yield self._image_result(event, cache_path)
+            except Exception as e:
+                logger.warning(f"[headpat] 缓存存储失败: {e}")
+                # 缓存失败也发送原文件
+                yield self._image_result(event, gif_path)
+        else:
+            # 发送结果
+            yield self._image_result(event, gif_path)
+
+    def _calculate_avatar_hash(self, avatar: Image.Image) -> str:
+        """计算头像哈希值
+        
+        Args:
+            avatar: 头像图片
+            
+        Returns:
+            哈希字符串
+        """
+        # 缩小图片以加快计算
+        small = avatar.resize((32, 32), Image.Resampling.LANCZOS)
+        # 转换为字节
+        data = small.tobytes()
+        # 计算MD5哈希
+        return hashlib.md5(data).hexdigest()[:8]
 
     def _is_group_allowed(self, group_id: str) -> bool:
         """检查群是否允许使用摸头功能"""
