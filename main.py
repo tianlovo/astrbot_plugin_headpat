@@ -60,18 +60,6 @@ class HeadpatPlugin(Star):
         
         logger.info("[headpat] 插件已加载，定时清理任务已启动")
 
-    @filter.on_astrbot_unloaded()
-    async def on_astrbot_unloaded(self):
-        """插件卸载时清理资源"""
-        # 停止旧版清理任务
-        if self._cleanup_task and not self._cleanup_task.done():
-            self._cleanup_task.cancel()
-        
-        # 停止缓存自动清理任务
-        self.cache_service.stop_auto_cleanup()
-        
-        logger.info("[headpat] 插件已卸载，清理任务已停止")
-
     @filter.command("摸头", alias={"摸摸", "摸", "摸头杀"})
     async def headpat_command(self, event: AstrMessageEvent):
         '''摸头命令 - at机器人后发送摸头命令生成个性化摸头GIF
