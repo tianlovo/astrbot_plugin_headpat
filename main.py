@@ -117,13 +117,11 @@ class HeadpatPlugin(Star):
             yield event.plain_result("摸头素材缺失，请联系管理员检查插件目录下 data/petpet/frame0~4.png")
             return
 
-        # 计算头像哈希用于缓存
-        avatar_hash = None
-        
-        # 尝试从缓存获取
+        # 尝试从缓存获取（不检查头像哈希，只检查用户ID）
+        # 这样同一用户的缓存可以直接使用，无需调用QQ API
         if self.patpat_config.get("cache_enabled", True):
             try:
-                cached_path = self.cache_service.get(target_user_id, avatar_hash)
+                cached_path = self.cache_service.get(target_user_id)
                 if cached_path and cached_path.exists():
                     logger.info(f"[headpat] 缓存命中: {target_user_id}")
                     yield self._image_result(event, cached_path)
@@ -137,23 +135,12 @@ class HeadpatPlugin(Star):
             yield event.plain_result("未能获取目标头像，请稍后再试。")
             return
         
-        # 计算头像哈希
+        # 计算头像哈希用于存储缓存
+        avatar_hash = None
         try:
             avatar_hash = self._calculate_avatar_hash(avatar)
         except Exception as e:
             logger.warning(f"[headpat] 计算头像哈希失败: {e}")
-            avatar_hash = None
-        
-        # 再次检查缓存（使用哈希）
-        if self.patpat_config.get("cache_enabled", True) and avatar_hash:
-            try:
-                cached_path = self.cache_service.get(target_user_id, avatar_hash)
-                if cached_path and cached_path.exists():
-                    logger.info(f"[headpat] 缓存命中（带哈希）: {target_user_id}")
-                    yield self._image_result(event, cached_path)
-                    return
-            except Exception as e:
-                logger.warning(f"[headpat] 读取缓存失败: {e}")
 
         # 生成GIF
         try:
